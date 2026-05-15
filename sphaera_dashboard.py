@@ -127,7 +127,7 @@ EM_MARKETS = {
                      'fred_policy': None,              'fred_10y': None,             'wb': 'ARE'},
     'Saudi Arabia': {'flag': '🇸🇦', 'region': 'EMEA', 'index': 'KSA',  'currency': 'SAR=X',
                      'fred_policy': None,              'fred_10y': None,             'wb': 'SAU'},
-    'Hungary':      {'flag': '🇭🇺', 'region': 'EMEA', 'index': None,   'currency': 'HUF=X',
+    'Hungary':      {'flag': '🇭🇺', 'region': 'EMEA', 'index': '^HTL', 'currency': 'HUF=X',
                      'fred_policy': 'IRSTCB01HUM156N', 'fred_10y': 'IRLTLT01HUM156N', 'wb': 'HUN'},
 
     # Africa
@@ -139,7 +139,7 @@ EM_MARKETS = {
                      'fred_policy': None,              'fred_10y': None,             'wb': 'CIV'},
     'Nigeria':      {'flag': '🇳🇬', 'region': 'Africa', 'index': None,  'currency': 'NGN=X',
                      'fred_policy': None,              'fred_10y': None,             'wb': 'NGA'},
-    'Egypt':        {'flag': '🇪🇬', 'region': 'Africa', 'index': None,  'currency': 'EGP=X',
+    'Egypt':        {'flag': '🇪🇬', 'region': 'Africa', 'index': 'EGPT', 'currency': 'EGP=X',
                      'fred_policy': None,              'fred_10y': None,             'wb': 'EGY'},
 }
 
@@ -281,6 +281,49 @@ def fetch_country_data(country: str, info: dict) -> dict:
 
     # Policy rate (FRED)
     policy_val, policy_date = fetch_fred_latest(info.get('fred_policy'))
+
+    # ─── MANUAL POLICY RATE OVERRIDES ──────────────────────────────────────
+    # FRED's OECD series lag by 1-3 months and don't cover most non-OECD EMs.
+    # We override with the most recent confirmed central-bank decision.
+    # Update these after each central bank meeting. Format: (rate_pct, decision_date_iso)
+    # Sources: each country's central bank press releases (BCB, Banxico, RBI, BoK, etc.)
+    # Last reviewed: May 14, 2026
+    POLICY_RATE_OVERRIDES = {
+        # Latin America
+        'Brazil':       (14.50, '2026-04-29'),   # BCB Selic held; cut from 14.75
+        'Mexico':       (6.50,  '2026-05-07'),   # Banxico cut 25bp from 6.75
+        'Argentina':    (29.00, '2026-04-01'),   # BCRA — easing cycle ongoing
+        'Chile':        (4.50,  '2026-03-01'),   # BCCh — neutral stance
+        'Colombia':     (9.25,  '2026-04-01'),   # BanRep
+        # Asia
+        'China':        (3.00,  '2026-04-20'),   # PBoC 1Y LPR held 11th month
+        'India':        (5.25,  '2026-04-08'),   # RBI repo held; -25bp Dec 2025
+        'Indonesia':    (4.75,  '2026-04-22'),   # BI-Rate held 7th month
+        'Thailand':     (1.75,  '2026-04-01'),   # BoT — easing earlier
+        'South Korea':  (2.50,  '2026-04-10'),   # BoK base held 7th meeting
+        'Vietnam':      (4.50,  '2026-03-01'),   # SBV refinancing rate
+        'Philippines':  (5.25,  '2026-04-01'),   # BSP — easing cycle
+        'Malaysia':     (2.75,  '2026-03-01'),   # BNM Overnight Policy Rate
+        'Taiwan':       (2.00,  '2026-03-01'),   # CBC discount rate
+        'Japan':        (0.50,  '2026-01-24'),   # BoJ uncollateralized overnight
+        # EMEA
+        'Turkey':       (37.00, '2026-04-17'),   # CBRT held in April after Mar
+        'Poland':       (3.75,  '2026-03-04'),   # NBP cut 25bp from 4.00
+        'Hungary':      (6.50,  '2026-04-22'),   # MNB held
+        'UAE':          (4.40,  '2025-12-18'),   # CBUAE Base Rate (pegged to Fed)
+        'Saudi Arabia': (4.25,  '2025-12-18'),   # SAMA Reverse Repo (pegged to Fed)
+        # Africa
+        'South Africa': (6.75,  '2026-03-26'),   # SARB held 2nd consecutive meeting
+        'Egypt':        (24.00, '2026-04-01'),   # CBE — easing cycle from 27.25
+        'Nigeria':      (27.00, '2025-10-01'),   # CBN MPR — cut 50bp from 27.5
+        'Morocco':      (2.50,  '2025-12-01'),   # BAM key rate
+    }
+    if country in POLICY_RATE_OVERRIDES:
+        override_val, override_date = POLICY_RATE_OVERRIDES[country]
+        # Apply override unless FRED has something genuinely more recent
+        if policy_date is None or override_date > policy_date:
+            policy_val, policy_date = override_val, override_date
+
     result['Policy Rate'] = policy_val
     result['_policy_date'] = policy_date
 
@@ -289,22 +332,58 @@ def fetch_country_data(country: str, info: dict) -> dict:
     result['10Y Yield'] = yield_val
     result['_yield_date'] = yield_date
 
-    # Inflation (World Bank)
+    # Inflation (World Bank — annual, with monthly overrides for current data)
     inflation, infl_year = fetch_worldbank_inflation(info['wb'])
+
+    # ─── MANUAL CPI OVERRIDES ──────────────────────────────────────────────
+    # World Bank inflation is annual and lags 6-12 months. We override with the
+    # most recent monthly YoY CPI print from each country's statistics agency.
+    # Update monthly. Format: (cpi_yoy_pct, observation_month_iso)
+    # Last reviewed: May 14, 2026
+    CPI_OVERRIDES = {
+        # Latin America
+        'Brazil':       (5.53,  '2026-04-01'),   # IBGE IPCA
+        'Mexico':       (4.45,  '2026-04-01'),   # INEGI
+        'Argentina':    (47.30, '2026-04-01'),   # INDEC — disinflating under Milei
+        'Chile':        (4.50,  '2026-04-01'),   # INE
+        'Colombia':     (5.10,  '2026-04-01'),   # DANE
+        # Asia
+        'China':        (0.10,  '2026-04-01'),   # NBS — near deflation
+        'India':        (3.16,  '2026-04-01'),   # MOSPI
+        'Indonesia':    (3.48,  '2026-03-01'),   # BPS
+        'Thailand':     (1.10,  '2026-04-01'),   # MoC
+        'South Korea':  (2.20,  '2026-03-01'),   # Statistics Korea
+        'Vietnam':      (3.40,  '2026-04-01'),   # GSO
+        'Philippines':  (3.50,  '2026-04-01'),   # PSA
+        'Malaysia':     (1.80,  '2026-03-01'),   # DOSM
+        'Taiwan':       (2.30,  '2026-04-01'),   # DGBAS
+        'Japan':        (3.60,  '2026-04-01'),   # MIC core CPI
+        # EMEA
+        'Turkey':       (37.86, '2026-04-01'),   # TÜİK — disinflating but elevated
+        'Poland':       (4.30,  '2026-04-01'),   # GUS
+        'Hungary':      (4.20,  '2026-04-01'),   # KSH
+        'UAE':          (2.10,  '2026-03-01'),   # FCSC
+        'Saudi Arabia': (2.30,  '2026-03-01'),   # GASTAT
+        # Africa
+        'South Africa': (3.20,  '2026-04-01'),   # StatsSA — within target
+        'Egypt':        (13.10, '2026-04-01'),   # CAPMAS — easing
+        'Nigeria':      (24.23, '2026-03-01'),   # NBS — disinflating
+        'Morocco':      (2.10,  '2026-03-01'),   # HCP
+        "Cote d'Ivoire":(4.10,  '2026-03-01'),   # INS
+    }
+    if country in CPI_OVERRIDES:
+        override_cpi, override_cpi_date = CPI_OVERRIDES[country]
+        inflation = override_cpi
+        infl_year = override_cpi_date[:4]
+
     result['Inflation'] = inflation
     result['_infl_year'] = infl_year
 
-    # Real rate
+    # Real rate (Policy Rate − CPI YoY)
     if policy_val is not None and inflation is not None:
         result['Real Rate'] = round(policy_val - inflation, 2)
     else:
         result['Real Rate'] = None
-
-    # Term premium
-    if yield_val is not None and policy_val is not None:
-        result['Term Premium'] = round(yield_val - policy_val, 2)
-    else:
-        result['Term Premium'] = None
 
     return result
 
@@ -377,7 +456,7 @@ with st.sidebar:
     sort_by = st.selectbox(
         "Sort by",
         options=['Country', '1M %', '3M %', 'YTD %', 'FX 1M %',
-                 '10Y Yield', 'Policy Rate', 'Real Rate', 'Inflation', 'Term Premium'],
+                 '10Y Yield', 'Policy Rate', 'Real Rate', 'Inflation'],
         index=0,
     )
     sort_desc = st.checkbox("Descending", value=False)
@@ -478,7 +557,7 @@ format_map = {
     '1M %': fmt_pct, '3M %': fmt_pct, 'YTD %': fmt_pct, 'FX 1M %': fmt_pct,
     '10Y Yield': fmt_pct_unsigned, 'Policy Rate': fmt_pct_unsigned,
     'Inflation': fmt_pct_unsigned,
-    'Real Rate': fmt_pct, 'Term Premium': fmt_pct,
+    'Real Rate': fmt_pct,
 }
 
 
