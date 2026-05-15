@@ -137,9 +137,9 @@ EM_MARKETS = {
                      'fred_policy': None,              'fred_10y': None,             'wb': 'MAR'},
     "Cote d'Ivoire":{'flag': '🇨🇮', 'region': 'Africa', 'index': None,  'currency': 'XOF=X',
                      'fred_policy': None,              'fred_10y': None,             'wb': 'CIV'},
-    'Nigeria':      {'flag': '🇳🇬', 'region': 'Africa', 'index': None,  'currency': 'NGN=X',
+    'Nigeria':      {'flag': '🇳🇬', 'region': 'Africa', 'index': '^NGSEINDX', 'currency': 'NGN=X',
                      'fred_policy': None,              'fred_10y': None,             'wb': 'NGA'},
-    'Egypt':        {'flag': '🇪🇬', 'region': 'Africa', 'index': 'EGPT', 'currency': 'EGP=X',
+    'Egypt':        {'flag': '🇪🇬', 'region': 'Africa', 'index': '^CASE30', 'currency': 'EGP=X',
                      'fred_policy': None,              'fred_10y': None,             'wb': 'EGY'},
 }
 
@@ -327,8 +327,52 @@ def fetch_country_data(country: str, info: dict) -> dict:
     result['Policy Rate'] = policy_val
     result['_policy_date'] = policy_date
 
-    # 10Y yield (FRED — only OECD coverage)
+    # 10Y yield (FRED — only OECD coverage; manual overrides for non-OECD EMs)
     yield_val, yield_date = fetch_fred_latest(info.get('fred_10y'))
+
+    # ─── MANUAL 10Y YIELD OVERRIDES ────────────────────────────────────────
+    # FRED only covers OECD members. Most EM 10Y yields require manual entry.
+    # Source: Trading Economics, Investing.com, or local debt management agencies.
+    # REFRESH SCHEDULE: every 2 weeks (after major macro moves, sooner)
+    # Format: (yield_pct, observation_date_iso)
+    # Last reviewed: May 14, 2026
+    YIELD_OVERRIDES = {
+        # Latin America
+        'Brazil':       (13.90, '2026-05-14'),   # 10Y NTN-F amid inflation re-pricing
+        'Mexico':       (8.74,  '2026-05-14'),   # 10Y M-Bond (FRED covers but stale)
+        'Argentina':    (None,  '2026-05-14'),   # No reliable 10Y benchmark
+        'Chile':        (5.55,  '2026-05-14'),   # FRED-consistent
+        'Colombia':     (10.40, '2026-05-14'),   # 10Y TES
+        # Asia
+        'China':        (1.70,  '2026-05-14'),   # 10Y CGB — historic lows
+        'India':        (6.30,  '2026-05-14'),   # 10Y G-Sec
+        'Indonesia':    (6.85,  '2026-05-14'),   # 10Y INDOGB
+        'Thailand':     (2.30,  '2026-05-14'),   # 10Y ThaiGB
+        'South Korea':  (2.80,  '2026-05-14'),   # 10Y KTB
+        'Vietnam':      (3.05,  '2026-05-14'),   # 10Y VGB
+        'Philippines':  (6.10,  '2026-05-14'),   # 10Y PHGB
+        'Malaysia':     (3.70,  '2026-05-14'),   # 10Y MGS
+        'Taiwan':       (1.50,  '2026-05-14'),   # 10Y TWGB
+        'Japan':        (1.50,  '2026-05-14'),   # 10Y JGB — rising under BoJ normalization
+        # EMEA
+        'Turkey':       (32.50, '2026-05-14'),   # 10Y TURKGB
+        'Poland':       (5.40,  '2026-05-14'),   # 10Y POLGB
+        'Hungary':      (7.13,  '2026-05-14'),   # FRED-consistent
+        'UAE':          (4.50,  '2026-05-14'),   # 10Y UAE sovereign USD
+        'Saudi Arabia': (4.65,  '2026-05-14'),   # 10Y KSA sovereign USD
+        # Africa
+        'South Africa': (9.80,  '2026-05-14'),   # 10Y R213/R2030
+        'Egypt':        (24.50, '2026-05-14'),   # 10Y EGYTB local
+        'Nigeria':      (18.50, '2026-05-14'),   # 10Y FGN local
+        'Morocco':      (4.10,  '2026-05-14'),   # 10Y MORGB
+        "Cote d'Ivoire":(7.50,  '2026-05-14'),   # 10Y CFA sovereign
+    }
+    if country in YIELD_OVERRIDES:
+        override_y, override_y_date = YIELD_OVERRIDES[country]
+        if override_y is not None:
+            yield_val = override_y
+            yield_date = override_y_date
+
     result['10Y Yield'] = yield_val
     result['_yield_date'] = yield_date
 
